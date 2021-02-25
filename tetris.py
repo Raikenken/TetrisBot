@@ -119,7 +119,9 @@ def remove_row(board, row):
     return [[0 for i in range(cols)]] + board
 
 def join_matrixes(mat1, mat2, mat2_off):
+    mat1 = list(mat1)
     off_x, off_y = mat2_off
+    #print(off_y)
     for cy, row in enumerate(mat2):
         for cx, val in enumerate(row):
             mat1[cy+off_y-1 ][cx+off_x] += val
@@ -133,8 +135,227 @@ def new_board():
     board += [[ 1 for x in range(cols)]]
     return board
 
+class tetris_agent:
+    def __init__(self):
+        self.space_below_rate = -5
+        self.clear_rate = 3
+        self.approaching_lc = 10
+        self.block_look_ahead = 1
+
+        self.pos_cur_moves = []
+        self.pos_hold_moves = []
+
+        self.board = None
+        self.board_copy = None
+        self.stone = None
+        self.hold_stone = None
+        self.cols = None
+        self.stone_x = None
+        self.stone_y = None
+
+        self.pos_move = None
+
+    def set_values(self, main_board, board, cur_stone, hold_stone, cols):
+        self.board = list(board)
+        self.board_copy = list(self.board)
+        self.stone = cur_stone
+        self.hold_stone = hold_stone
+        self.cols = cols
+        self.stone_x = self.cols - len(self.stone[0])
+        self.stone_y = 0
+
+        self.pos_cur_moves = []
+        self.pos_hold_moves = []
+
+        self.pos_move = None
+
+    def solve(self, main_board, board, cur_stone, hold_stone, cols):
+        print("solving")
+        self.set_values(list(main_board), list(board), cur_stone, hold_stone, cols)
+        print("set values done")
+        self.look_ahead()
+        print("look ahead done")
+        self.board_rate()
+        print("board_rate done")
+        return self.best_backtrack()
+
+    def look_ahead(self):
+
+        self.pos_cur_moves = []
+        self.pos_hold_moves = []
+
+        self.cur_score = []
+        self.hold_score = []
+
+        for _ in range(4):
+            while self.stone_x > 0:
+                self.insta_drop()
+                self.pos_cur_moves.append(self.pos_move)
+                self.move(-1)
+            print("rotating")
+            print(self.board)
+            print(self.board_copy)
+            self.rotate_stone_clockwise()
+            self.stone_x = self.cols - len(self.stone[0])
+
+        if sum(self.hold_stone[0]) > 0:
+            self.switch_hold()
+            for _ in range(4):
+                while self.stone_x > 0:
+                    self.insta_drop()
+                    self.pos_hold_moves.append(self.pos_move)
+                    self.move(-1)
+                self.rotate_stone_clockwise()
+                self.stone_x = self.cols - len(self.stone[0])
+            self.switch_hold()
+
+    def drop(self):
+        self.stone_y += 1
+        if check_collision(self.board,
+                           self.stone,
+                           (self.stone_x, self.stone_y)):
+            self.board = join_matrixes(
+              self.board,
+              self.stone,
+              (self.stone_x, self.stone_y))
+
+            self.pos_move = list(self.board)
+            self.stone_y = 0
+            return True
+        return False
+
+    def insta_drop(self):
+        while(self.drop() == False):
+            pass
+
+    def move(self, delta_x):
+        new_x = self.stone_x + delta_x
+        if new_x < 0:
+            new_x = 0
+        if new_x > self.cols - len(self.stone[0]):
+            new_x = self.cols - len(self.stone[0])
+        if not check_collision(self.board,
+                               self.stone,
+                               (new_x, self.stone_y)):
+            self.stone_x = new_x
+
+    def rotate_stone_clockwise(self):
+        new_stone = rotate_clockwise(self.stone)
+        if not check_collision(self.board,
+                               new_stone,
+                               (self.stone_x, self.stone_y)):
+            self.stone = new_stone
+
+    def switch_hold(self):
+        self.stone, self.hold_stone = self.hold_stone, tetris_shapes[max(self.stone[0])-1]
+        self.stone_x = self.cols - len(self.stone[0])
+
+    def board_rate(self):
+        remove_index = []
+        for b in self.pos_cur_moves:
+            score = 0
+            for row in range(len(b)):
+                if sum(b[row]) > 0:
+                    if not(0 in b[row]):
+                        score += self.clear_rate
+                    else:
+                        for index in range(self.cols):
+                            if index not in remove_index:
+                                remove_index.append(index)
+
+                                for index_below in range(row+1, len(b)):
+                                    if b[index_below][index] == 0:
+                                        score += self.space_below_rate
+
+            self.cur_score.append(score)
+            print(self.cur_score)
+
+        for b in self.pos_hold_moves:
+            score = 0
+            for row in range(len(b)):
+                if sum(b[row]) > 0:
+                    if not (0 in b[row]):
+                        score += self.clear_rate
+                    else:
+                        for index in range(self.cols):
+                            if index not in remove_index:
+                                remove_index.append(index)
+
+                                for index_below in range(row + 1, len(b)):
+                                    if b[index_below][index] == 0:
+                                        score += self.space_below_rate
+
+            self.hold_score.append(score)
+
+    def best_backtrack(self):
+        cur_move1 = self.cols - len(self.stone[0]) + 1
+        cur_move2 = self.cols - len(self.stone) + 1
+        self.switch_hold()
+        hold_move1 = self.cols - len(self.stone[0]) + 1
+        hold_move2 = self.cols - len(self.stone) + 1
+
+        self.switch_hold()
+
+        cur_high = max(self.cur_score)
+        if len(self.hold_score)>0:
+            hold_high = max(self.hold_score)
+        else:
+            hold_high = -1000
+
+        do_switch = 0
+
+        if cur_high >= hold_high:
+            index_high = self.cur_score.index(cur_high)
+            if 0 <= index_high < cur_move1:
+                rotation_count = 0
+                stone_length = len(self.stone[0])
+            elif cur_move1 <= index_high < cur_move1 + cur_move2:
+                rotation_count = 1
+                index_high = index_high - cur_move1
+                stone_length = len(self.stone)
+            elif cur_move1 + cur_move2 <= index_high < cur_move1*2 + cur_move2:
+                rotation_count =2
+                index_high = index_high - (cur_move1 + cur_move2)
+                stone_length = len(self.stone[0])
+            else:
+                rotation_count = 3
+                index_high = index_high - (cur_move1*2 - cur_move2)
+                stone_length = len(self.stone)
+
+            stone_x = cols - stone_length - index_high
+            move_count = stone_x - int(cols/2 - stone_length/2)
+
+            return do_switch, rotation_count, move_count
+
+        else:
+            index_high = self.hold_score.index(hold_high)
+            self.switch_hold()
+            if 0 <= index_high < hold_move1:
+                rotation_count = 0
+                stone_length = len(self.stone[0])
+            elif cur_move1 <= index_high < hold_move1 + hold_move2:
+                rotation_count = 1
+                index_high = index_high - hold_move1
+                stone_length = len(self.stone)
+            elif cur_move1 + cur_move2 <= index_high < hold_move1 * 2 + hold_move2:
+                rotation_count = 2
+                index_high = index_high - (hold_move1 + hold_move2)
+                stone_length = len(self.stone[0])
+            else:
+                rotation_count = 3
+                index_high = index_high - (hold_move1 * 2 - hold_move2)
+                stone_length = len(self.stone)
+
+            stone_x = cols - stone_length - index_high
+            move_count = stone_x - int(cols / 2 - stone_length / 2)
+
+            do_switch = 1
+
+            return do_switch, rotation_count, move_count
+
 class TetrisApp(object):
     def __init__(self):
+        self.bot = tetris_agent()
         pygame.init()
         pygame.key.set_repeat(250,25)
         self.width = cell_size*(cols+6)
@@ -182,7 +403,22 @@ class TetrisApp(object):
         self.hold_stone = [[0,0,0],[0,0,0]]
         self.switched = False
         self.timer = time.time()
+        self.perform_bot()
         pygame.time.set_timer(pygame.USEREVENT+1, 1000)
+
+    def perform_bot(self):
+        do_switch, rotation_count, move_count = self.bot.solve(list(self.board),list(self.board),self.stone,self.hold_stone,cols)
+        if do_switch:
+            self.switch_hold()
+        for _ in range(rotation_count):
+            self.rotate_stone_clockwise()
+        if move_count < 0:
+            for _ in range(abs(move_count)):
+                self.move(-1)
+        else:
+            for _ in range(move_count):
+                self.move(1)
+        self.insta_drop()
 
     def disp_msg(self, msg, topleft):
         x,y = topleft
@@ -283,6 +519,8 @@ class TetrisApp(object):
         if not self.gameover and not self.paused:
             while(not self.drop(True)):
                 pass
+        '''if not self.gameover and not self.paused:
+            self.perform_bot()'''
 
     def rotate_stone_clockwise(self):
         if not self.gameover and not self.paused:
@@ -390,202 +628,3 @@ if __name__ == '__main__':
     App.run()
 
 
-class tetris_agent:
-    def __init__(self):
-        self.space_below_rate = -5
-        self.clear_rate = 3
-        self.approaching_lc = 10
-        self.block_look_ahead = 1
-
-        self.pos_cur_moves = []
-        self.pos_hold_moves = []
-
-        self.board = None
-        self.stone = None
-        self.hold_stone = None
-        self.cols = None
-        self.stone_x = None
-        self.stone_y = None
-
-        self.pos_move = None
-
-    def set_values(self, board, cur_stone, hold_stone, cols):
-        self.board = board
-        self.stone = cur_stone
-        self.hold_stone = hold_stone
-        self.cols = cols
-        self.stone_x = self.cols - len(self.stone[0])
-        self.stone_y = 0
-
-        self.pos_move = None
-
-    def solve(self, board, cur_stone, hold_stone, cols):
-        self.set_values(board, cur_stone, hold_stone, cols)
-        self.look_ahead()
-        self.board_rate()
-
-    def look_ahead(self):
-
-        self.pos_cur_moves = []
-        self.pos_hold_moves = []
-
-        self.cur_score = []
-        self.hold_score = []
-
-        for _ in range(4):
-            while self.stone_x > 0:
-                self.insta_drop()
-                self.pos_cur_moves.append(self.pos_move)
-                self.move(-1)
-            self.rotate_stone_clockwise()
-            self.stone_x = self.cols - len(self.stone[0])
-
-        if sum(self.hold_stone[0]) > 0:
-            self.switch_hold()
-            for _ in range(4):
-                while self.stone_x > 0:
-                    self.insta_drop()
-                    self.pos_hold_moves.append(self.pos_move)
-                    self.move(-1)
-                self.rotate_stone_clockwise()
-                self.stone_x = self.cols - len(self.stone[0])
-            self.switch_hold()
-
-    def drop(self):
-        self.stone_y += 1
-        if check_collision(self.board,
-                           self.stone,
-                           (self.stone_x, self.stone_y)):
-            board = join_matrixes(
-              self.board,
-              self.stone,
-              (self.stone_x, self.stone_y))
-
-            self.pos_move = board
-            return True
-        return False
-
-    def insta_drop(self):
-        while(self.drop() == False):
-            pass
-
-    def move(self, delta_x):
-        new_x = self.stone_x + delta_x
-        if new_x < 0:
-            new_x = 0
-        if new_x > self.cols - len(self.stone[0]):
-            new_x = self.cols - len(self.stone[0])
-        if not check_collision(self.board,
-                               self.stone,
-                               (new_x, self.stone_y)):
-            self.stone_x = new_x
-
-    def rotate_stone_clockwise(self):
-        new_stone = rotate_clockwise(self.stone)
-        if not check_collision(self.board,
-                               new_stone,
-                               (self.stone_x, self.stone_y)):
-            self.stone = new_stone
-
-    def switch_hold(self):
-        self.stone, self.hold_stone = self.hold_stone, tetris_shapes[max(self.stone[0])-1]
-        self.stone_x = self.cols - len(self.stone[0])
-
-    def board_rate(self):
-        remove_index = []
-        for b in self.pos_cur_moves:
-            score = 0
-            for row in range(len(b)):
-                if sum(b[row]) > 0:
-                    if not(0 in b[row]):
-                        score += self.clear_rate
-                    else:
-                        for index in range(self.cols):
-                            if index not in remove_index:
-                                remove_index.append(index)
-
-                                for index_below in range(row+1, len(b)):
-                                    if b[index_below][index] == 0:
-                                        score += self.space_below_rate
-
-            self.pos_score.append(score)
-
-        for b in self.pos_hold_moves:
-            score = 0
-            for row in range(len(b)):
-                if sum(b[row]) > 0:
-                    if not (0 in b[row]):
-                        score += self.clear_rate
-                    else:
-                        for index in range(self.cols):
-                            if index not in remove_index:
-                                remove_index.append(index)
-
-                                for index_below in range(row + 1, len(b)):
-                                    if b[index_below][index] == 0:
-                                        score += self.space_below_rate
-
-            self.hold_score.append(score)
-
-    def best_backtrack(self):
-        cur_move1 = self.cols - len(self.stone[0]) + 1
-        cur_move2 = self.cols - len(self.stone) + 1
-        self.switch_hold()
-        hold_move1 = self.cols - len(self.stone[0]) + 1
-        hold_move2 = self.cols - len(self.stone) + 1
-
-        self.switch_hold()
-
-        cur_high = max(self.cur_score)
-        hold_high = max(self.hold_score)
-
-        do_switch = 0
-
-        if cur_high >= hold_high:
-            index_high = self.cur_score.index(cur_high)
-            if 0 <= index_high < cur_move1:
-                rotation_count = 0
-                stone_length = len(self.stone[0])
-            elif cur_move1 <= index_high < cur_move1 + cur_move2:
-                rotation_count = 1
-                index_high = index_high - cur_move1
-                stone_length = len(self.stone)
-            elif cur_move1 + cur_move2 <= index_high < cur_move1*2 + cur_move2:
-                rotation_count =2
-                index_high = index_high - (cur_move1 + cur_move2)
-                stone_length = len(self.stone[0])
-            else:
-                rotation_count = 3
-                index_high = index_high - (cur_move1*2 - cur_move2)
-                stone_length = len(self.stone)
-
-            stone_x = cols - stone_length - index_high
-            move_count = stone_x - int(cols/2 - stone_length/2)
-
-            return do_switch, rotation_count, move_count
-
-        else:
-            index_high = self.hold_score.index(hold_high)
-            self.switch_hold()
-            if 0 <= index_high < hold_move1:
-                rotation_count = 0
-                stone_length = len(self.stone[0])
-            elif cur_move1 <= index_high < hold_move1 + hold_move2:
-                rotation_count = 1
-                index_high = index_high - hold_move1
-                stone_length = len(self.stone)
-            elif cur_move1 + cur_move2 <= index_high < hold_move1 * 2 + hold_move2:
-                rotation_count = 2
-                index_high = index_high - (hold_move1 + hold_move2)
-                stone_length = len(self.stone[0])
-            else:
-                rotation_count = 3
-                index_high = index_high - (hold_move1 * 2 - hold_move2)
-                stone_length = len(self.stone)
-
-            stone_x = cols - stone_length - index_high
-            move_count = stone_x - int(cols / 2 - stone_length / 2)
-
-            do_switch = 1
-
-            return do_switch, rotation_count, move_count
