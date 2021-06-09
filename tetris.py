@@ -36,11 +36,11 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from random import randrange as rand
 import random
 import pygame, sys
 import time
-from datetime import timedelta
+from copy import deepcopy
+import pandas as pd
 
 # The configuration
 cell_size = 30
@@ -136,11 +136,12 @@ def new_board():
     return board
 
 class tetris_agent:
-    def __init__(self):
+    def __init__(self, clear_rate, leveler):
         self.space_below_rate = -5
-        self.clear_rate = 3
+        self.clear_rate = clear_rate
         self.approaching_lc = 10
         self.block_look_ahead = 1
+        self.leveler = leveler
 
         self.pos_cur_moves = []
         self.pos_hold_moves = []
@@ -155,9 +156,11 @@ class tetris_agent:
 
         self.pos_move = None
 
-    def set_values(self, main_board, board, cur_stone, hold_stone, cols):
-        self.board = list(board)
-        self.board_copy = list(self.board)
+    def set_values(self, board, cur_stone, hold_stone, cols):
+        #print(cur_stone)
+        #print(hold_stone)
+        self.board = deepcopy(board)
+        self.board_copy = deepcopy(board)
         self.stone = cur_stone
         self.hold_stone = hold_stone
         self.cols = cols
@@ -169,14 +172,14 @@ class tetris_agent:
 
         self.pos_move = None
 
-    def solve(self, main_board, board, cur_stone, hold_stone, cols):
-        print("solving")
-        self.set_values(list(main_board), list(board), cur_stone, hold_stone, cols)
-        print("set values done")
+    def solve(self, board, cur_stone, hold_stone, cols):
+        #print("solving")
+        self.set_values(board, cur_stone, hold_stone, cols)
+        #print("set values done")
         self.look_ahead()
-        print("look ahead done")
+        #print("look ahead done")
         self.board_rate()
-        print("board_rate done")
+        #print("board_rate done")
         return self.best_backtrack()
 
     def look_ahead(self):
@@ -192,9 +195,15 @@ class tetris_agent:
                 self.insta_drop()
                 self.pos_cur_moves.append(self.pos_move)
                 self.move(-1)
-            print("rotating")
-            print(self.board)
-            print(self.board_copy)
+                if len(self.pos_cur_moves) > 1:
+                    if(self.pos_cur_moves[-1] == self.pos_cur_moves[-2]):
+                        break
+            #print("rotating")
+            #print(self.pos_cur_moves)
+            #print(self.board)
+            #print(self.board_copy)
+            self.insta_drop()
+            self.pos_cur_moves.append(self.pos_move)
             self.rotate_stone_clockwise()
             self.stone_x = self.cols - len(self.stone[0])
 
@@ -205,6 +214,11 @@ class tetris_agent:
                     self.insta_drop()
                     self.pos_hold_moves.append(self.pos_move)
                     self.move(-1)
+                    if len(self.pos_hold_moves) > 1:
+                        if (self.pos_hold_moves[-1] == self.pos_hold_moves[-2]):
+                            break
+                self.insta_drop()
+                self.pos_hold_moves.append(self.pos_move)
                 self.rotate_stone_clockwise()
                 self.stone_x = self.cols - len(self.stone[0])
             self.switch_hold()
@@ -219,7 +233,9 @@ class tetris_agent:
               self.stone,
               (self.stone_x, self.stone_y))
 
-            self.pos_move = list(self.board)
+            self.pos_move = self.board
+            self.board = deepcopy(self.board_copy)
+            #print(self.pos_move)
             self.stone_y = 0
             return True
         return False
@@ -251,40 +267,58 @@ class tetris_agent:
         self.stone_x = self.cols - len(self.stone[0])
 
     def board_rate(self):
-        remove_index = []
         for b in self.pos_cur_moves:
+            remove_index = []
             score = 0
+            highest = 0
+            found_highest = False
             for row in range(len(b)):
                 if sum(b[row]) > 0:
+                    #print("true")
                     if not(0 in b[row]):
                         score += self.clear_rate
                     else:
+                        if not found_highest:
+                            found_highest = True
+                            highest = len(b) - row
+                            #print("highest is " + str(highest))
                         for index in range(self.cols):
-                            if index not in remove_index:
+                            if index not in remove_index and b[row][index]>0:
                                 remove_index.append(index)
+                                #print(b)
 
                                 for index_below in range(row+1, len(b)):
                                     if b[index_below][index] == 0:
                                         score += self.space_below_rate
-
+                                        #print(row+1, index)
+                                        #print(score)
+            score -= highest * self.leveler
             self.cur_score.append(score)
-            print(self.cur_score)
+            #print(self.cur_score)
 
         for b in self.pos_hold_moves:
+            remove_index = []
             score = 0
+            highest = 0
+            found_highest = False
             for row in range(len(b)):
                 if sum(b[row]) > 0:
                     if not (0 in b[row]):
                         score += self.clear_rate
                     else:
+                        if not found_highest:
+                            found_highest = True
+                            highest = len(b) - row
+                            #print("highest is " + str(highest))
                         for index in range(self.cols):
-                            if index not in remove_index:
+                            if index not in remove_index and b[row][index]>0:
                                 remove_index.append(index)
 
                                 for index_below in range(row + 1, len(b)):
                                     if b[index_below][index] == 0:
                                         score += self.space_below_rate
 
+            score -= highest * self.leveler
             self.hold_score.append(score)
 
     def best_backtrack(self):
@@ -296,16 +330,37 @@ class tetris_agent:
 
         self.switch_hold()
 
-        cur_high = max(self.cur_score)
-        if len(self.hold_score)>0:
-            hold_high = max(self.hold_score)
+        index_high = 0
+        hold_index_high = 0
+
+        if random.randint(0,1) == 0:
+            cur_high = max(self.cur_score)
+            index_high = self.cur_score.index(cur_high)
+            if len(self.hold_score)>0:
+                hold_high = max(self.hold_score)
+                hold_index_high = self.hold_score.index(hold_high)
+            else:
+                hold_high = -1000
         else:
-            hold_high = -1000
+            self.cur_score.reverse()
+            self.hold_score.reverse()
+            cur_high = max(self.cur_score)
+            index_high = (len(self.cur_score)-1) - self.cur_score.index(cur_high)
+            if len(self.hold_score) > 0:
+                hold_high = max(self.hold_score)
+                hold_index_high = (len(self.hold_score)-1) - self.hold_score.index(hold_high)
+            else:
+                hold_high = -1000
+            self.cur_score.reverse()
+            self.hold_score.reverse()
 
         do_switch = 0
+        #print(self.cur_score)
+        #print(self.hold_score)
+
+        #print(cur_high, hold_high)
 
         if cur_high >= hold_high:
-            index_high = self.cur_score.index(cur_high)
             if 0 <= index_high < cur_move1:
                 rotation_count = 0
                 stone_length = len(self.stone[0])
@@ -319,43 +374,55 @@ class tetris_agent:
                 stone_length = len(self.stone[0])
             else:
                 rotation_count = 3
-                index_high = index_high - (cur_move1*2 - cur_move2)
+                index_high = index_high - (cur_move1*2 + cur_move2)
                 stone_length = len(self.stone)
 
             stone_x = cols - stone_length - index_high
-            move_count = stone_x - int(cols/2 - stone_length/2)
+            if (stone_length < 3) and not sum(self.stone[0]) == 14:
+                move_count = stone_x - int(cols / 2 - stone_length / 2) + 1
+            else:
+                move_count = stone_x - int(cols / 2 - stone_length / 2)
 
+            #print(do_switch, rotation_count, move_count)
+            #print("end")
             return do_switch, rotation_count, move_count
 
         else:
-            index_high = self.hold_score.index(hold_high)
             self.switch_hold()
-            if 0 <= index_high < hold_move1:
+            if 0 <= hold_index_high < hold_move1:
                 rotation_count = 0
                 stone_length = len(self.stone[0])
-            elif cur_move1 <= index_high < hold_move1 + hold_move2:
+            elif hold_move1 <= hold_index_high < hold_move1 + hold_move2:
                 rotation_count = 1
-                index_high = index_high - hold_move1
+                hold_index_high = hold_index_high - hold_move1
                 stone_length = len(self.stone)
-            elif cur_move1 + cur_move2 <= index_high < hold_move1 * 2 + hold_move2:
+            elif hold_move1 + cur_move2 <= hold_index_high < hold_move1 * 2 + hold_move2:
                 rotation_count = 2
-                index_high = index_high - (hold_move1 + hold_move2)
+                hold_index_high = hold_index_high - (hold_move1 + hold_move2)
                 stone_length = len(self.stone[0])
             else:
                 rotation_count = 3
-                index_high = index_high - (hold_move1 * 2 - hold_move2)
+                hold_index_high = hold_index_high - (hold_move1 * 2 + hold_move2)
                 stone_length = len(self.stone)
 
-            stone_x = cols - stone_length - index_high
-            move_count = stone_x - int(cols / 2 - stone_length / 2)
+            stone_x = cols - stone_length - hold_index_high
+
+            if(stone_length < 3) and not sum(self.stone[0]) == 14:
+                move_count = stone_x - int(cols / 2 - stone_length / 2) + 1
+            else:
+                move_count = stone_x - int(cols / 2 - stone_length / 2)
 
             do_switch = 1
 
+            #print(do_switch, rotation_count, move_count)
+            #print("end")
             return do_switch, rotation_count, move_count
 
 class TetrisApp(object):
-    def __init__(self):
-        self.bot = tetris_agent()
+    def __init__(self, clear_score, leveler):
+        self.bot = tetris_agent(clear_score, leveler)
+        self.clear_score = clear_score
+        self.leveler = leveler
         pygame.init()
         pygame.key.set_repeat(250,25)
         self.width = cell_size*(cols+6)
@@ -371,7 +438,7 @@ class TetrisApp(object):
                                                      # mouse movement
                                                      # events, so we
                                                      # block them.
-        self.init_game()
+        self.dont_burn_my_cpu = pygame.time.Clock()
 
     def generate_bag(self):
         if len(self.bag) < 7:
@@ -387,7 +454,7 @@ class TetrisApp(object):
 
         if check_collision(self.board,
                            self.stone,
-                           (self.stone_x, self.stone_y)) or self.lines >= 10:
+                           (self.stone_x, self.stone_y)) or self.lines >= 40:
             self.timer = time.time() - self.timer
             self.gameover = True
 
@@ -403,11 +470,21 @@ class TetrisApp(object):
         self.hold_stone = [[0,0,0],[0,0,0]]
         self.switched = False
         self.timer = time.time()
-        self.perform_bot()
+        #self.switch_hold()
+        self.debugger = 0
+        self.blocks = 0
+        self.gameover = False
+        self.paused = False
+        self.rec_depth = 0
         pygame.time.set_timer(pygame.USEREVENT+1, 1000)
+        return self.perform_bot()
 
     def perform_bot(self):
-        do_switch, rotation_count, move_count = self.bot.solve(list(self.board),list(self.board),self.stone,self.hold_stone,cols)
+        if sum(self.hold_stone[0]) == 0:
+            hold = self.next_stone
+        else:
+            hold = self.hold_stone
+        do_switch, rotation_count, move_count = self.bot.solve(list(self.board),self.stone,hold,cols)
         if do_switch:
             self.switch_hold()
         for _ in range(rotation_count):
@@ -418,7 +495,8 @@ class TetrisApp(object):
         else:
             for _ in range(move_count):
                 self.move(1)
-        self.insta_drop()
+        self.display()
+        return self.insta_drop()
 
     def disp_msg(self, msg, topleft):
         x,y = topleft
@@ -482,6 +560,9 @@ class TetrisApp(object):
                                    self.stone,
                                    (new_x, self.stone_y)):
                 self.stone_x = new_x
+            else:
+                #print("COLLISION!!!")
+                pass
     def quit(self):
         self.center_msg("Exiting...")
         pygame.display.update()
@@ -498,6 +579,7 @@ class TetrisApp(object):
                   self.board,
                   self.stone,
                   (self.stone_x, self.stone_y))
+                #(self.stone_y)
                 self.new_stone()
                 self.switched = False
                 cleared_rows = 0
@@ -515,12 +597,17 @@ class TetrisApp(object):
         return False
 
     def insta_drop(self):
-        print(self.stone_x)
+        #print(self.stone_x)
+        self.blocks += 1
         if not self.gameover and not self.paused:
             while(not self.drop(True)):
                 pass
-        '''if not self.gameover and not self.paused:
-            self.perform_bot()'''
+        if not self.gameover and not self.paused and self.debugger < 1000:
+            self.debugger += 1
+            self.rec_depth += 1
+            self.perform_bot()
+        self.rec_depth -= 1
+        return [[self.clear_score, self.leveler, abs(self.timer), self.blocks, abs(self.blocks/self.timer), self.lines >= 40]]
 
     def rotate_stone_clockwise(self):
         if not self.gameover and not self.paused:
@@ -552,6 +639,7 @@ class TetrisApp(object):
             self.new_stone()
         elif not self.switched:
             self.stone, self.hold_stone = self.hold_stone, tetris_shapes[max(self.stone[0])-1]
+            self.stone_x = int(cols / 2 - len(self.stone[0])/2)
 
         self.switched = True
 
@@ -578,15 +666,11 @@ class TetrisApp(object):
             'LSHIFT':    self.switch_hold
         }
 
-        self.gameover = False
-        self.paused = False
-
-        dont_burn_my_cpu = pygame.time.Clock()
         while 1:
             self.screen.fill((0,0,0))
             if self.gameover:
-                self.center_msg("""Game Over!\nYour score: %d
-Press enter to continue""" % abs(self.timer))
+                self.center_msg("""Game Over!\nYour score: %.2f seconds with lines %d and blocks %d and PPS of %.2f
+Press enter to continue""" % (abs(self.timer), self.lines, self.blocks, abs(self.blocks/self.timer)))
             else:
                 if self.paused:
                     self.center_msg("Paused")
@@ -612,7 +696,8 @@ Press enter to continue""" % abs(self.timer))
 
             for event in pygame.event.get():
                 if event.type == pygame.USEREVENT+1:
-                    self.drop(False)
+                    #self.drop(False)
+                    pass
                 elif event.type == pygame.QUIT:
                     self.quit()
                 elif event.type == pygame.KEYDOWN:
@@ -621,10 +706,48 @@ Press enter to continue""" % abs(self.timer))
                         +key):
                             key_actions[key]()
 
-            dont_burn_my_cpu.tick(maxfps)
+            self.dont_burn_my_cpu.tick(maxfps)
+
+    def display(self):
+        self.screen.fill((0, 0, 0))
+        if self.gameover:
+            self.center_msg("""Game Over!\nYour score: %d  with lines %d
+        Press enter to continue""" % abs(self.timer), self.lines)
+        else:
+            if self.paused:
+                self.center_msg("Paused")
+            else:
+                pygame.draw.line(self.screen,
+                                 (255, 255, 255),
+                                 (self.rlim + 1, 0),
+                                 (self.rlim + 1, self.height - 1))
+                self.disp_msg("Next:", (
+                    self.rlim + cell_size,
+                    2))
+                self.disp_msg("Score: %d\n\nLevel: %d\
+        \nLines: %d" % (self.score, self.level, self.lines),
+                              (self.rlim + cell_size, cell_size * 5))
+                self.draw_matrix(self.bground_grid, (0, 0))
+                self.draw_matrix(self.board, (0, 0))
+                self.draw_matrix(self.stone,
+                                 (self.stone_x, self.stone_y))
+                self.draw_matrix(self.next_stone,
+                                 (cols + 1, 2))
+                self.draw_matrix(self.hold_stone, (cols + 1, 15))
+        pygame.display.update()
+
+        self.dont_burn_my_cpu.tick(maxfps)
 
 if __name__ == '__main__':
-    App = TetrisApp()
-    App.run()
+    for scorer in range(1, 11):
+        for leveler in range(1, 11):
+            for _ in range(50):
+                data = pd.read_csv("Data.csv")
+                App = TetrisApp(scorer, leveler)
+                data_values = App.init_game()
+                print(data_values)
+                tempdf = pd.DataFrame(data_values, columns=["clear_score", "leveler", "time", "blocks", "pps", "win"])
+                data = data.append(tempdf)
+                data.to_csv("Data.csv", index=False)
 
 
